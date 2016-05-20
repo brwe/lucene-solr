@@ -59,6 +59,7 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.queries.CommonTermsQuery;
 import org.apache.lucene.queries.CustomScoreQuery;
 import org.apache.lucene.queries.payloads.SpanPayloadCheckQuery;
+import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.BooleanClause.Occur;
 import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.ConstantScoreQuery;
@@ -87,6 +88,7 @@ import org.apache.lucene.search.spans.SpanNotQuery;
 import org.apache.lucene.search.spans.SpanOrQuery;
 import org.apache.lucene.search.spans.SpanQuery;
 import org.apache.lucene.search.spans.SpanTermQuery;
+import org.apache.lucene.spatial.geopoint.search.GeoPointInBBoxQuery;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.LuceneTestCase;
@@ -161,6 +163,55 @@ public class HighlighterTest extends BaseTokenStreamTestCase implements Formatte
     String fragment = highlighter.getBestFragment(stream, storedField);
     assertEquals("Hello this is a piece of text that is <B>very</B> long and contains too much preamble and the meat is really here which says kennedy has been shot", fragment);
 
+  }
+
+  /*This fails with:
+
+  java.lang.NumberFormatException: Invalid shift value (110) in prefixCoded bytes (is encoded value really a geo point?)
+
+	at __randomizedtesting.SeedInfo.seed([11FF526A84E77972:B1615086FFE4D0AA]:0)
+	at org.apache.lucene.spatial.geopoint.document.GeoPointField.getPrefixCodedShift(GeoPointField.java:349)
+	at org.apache.lucene.spatial.geopoint.search.GeoPointPrefixTermsEnum.accept(GeoPointPrefixTermsEnum.java:217)
+	at org.apache.lucene.index.FilteredTermsEnum.next(FilteredTermsEnum.java:232)
+	at org.apache.lucene.search.TermCollectingRewrite.collectTerms(TermCollectingRewrite.java:67)
+	at org.apache.lucene.search.ScoringRewrite.rewrite(ScoringRewrite.java:108)
+	at org.apache.lucene.search.highlight.WeightedSpanTermExtractor.extract(WeightedSpanTermExtractor.java:222)
+	at org.apache.lucene.search.highlight.WeightedSpanTermExtractor.extract(WeightedSpanTermExtractor.java:229)
+	at org.apache.lucene.search.highlight.WeightedSpanTermExtractor.extract(WeightedSpanTermExtractor.java:112)
+	at org.apache.lucene.search.highlight.WeightedSpanTermExtractor.extract(WeightedSpanTermExtractor.java:213)
+	at org.apache.lucene.search.highlight.WeightedSpanTermExtractor.getWeightedSpanTerms(WeightedSpanTermExtractor.java:508)
+	at org.apache.lucene.search.highlight.QueryScorer.initExtractor(QueryScorer.java:218)
+	at org.apache.lucene.search.highlight.QueryScorer.init(QueryScorer.java:186)
+	at org.apache.lucene.search.highlight.Highlighter.getBestTextFragments(Highlighter.java:195)
+	at org.apache.lucene.search.highlight.Highlighter.getBestFragments(Highlighter.java:155)
+	at org.apache.lucene.search.highlight.Highlighter.getBestFragment(Highlighter.java:101)
+	at org.apache.lucene.search.highlight.HighlighterTest.testGeoPointQueryHighlight(HighlighterTest.java:191)
+	at sun.reflect.NativeMethodAccessorImpl.invoke0(Native Method)
+	at sun.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:62)
+	at sun.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43)
+	at java.lang.reflect.Method.invoke(Method.java:497)
+
+   */
+  public void testGeoPointQueryHighlight() throws Exception {
+    BooleanQuery boolQuery = new BooleanQuery.Builder().add(
+        new BooleanClause(new GeoPointInBBoxQuery("geo_point", -64.92354174306496
+            , 61.10078883158897, -170.15625, 118.47656249999999), BooleanClause.Occur.SHOULD)).add(
+        new BooleanClause(new TermQuery(new Term(FIELD_NAME, "instances")), BooleanClause.Occur.SHOULD)).build();
+    CustomScoreQuery query = new CustomScoreQuery(boolQuery);
+
+    searcher = newSearcher(reader);
+    TopDocs hits = searcher.search(query, 10);
+    QueryScorer scorer = new QueryScorer(query, FIELD_NAME);
+    Highlighter highlighter = new Highlighter(scorer);
+
+    final int docId0 = hits.scoreDocs[0].doc;
+    Document doc = searcher.doc(docId0);
+    String storedField = doc.get(FIELD_NAME);
+
+    TokenStream stream = getAnyTokenStream(FIELD_NAME, docId0);
+    Fragmenter fragmenter = new SimpleSpanFragmenter(scorer);
+    highlighter.setTextFragmenter(fragmenter);
+    highlighter.getBestFragment(stream, storedField);
   }
 
   public void testQueryScorerHits() throws Exception {
